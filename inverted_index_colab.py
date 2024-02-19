@@ -74,6 +74,7 @@ class InvertedIndex:
     -----------
       docs: dict mapping doc_id to list of tokens
     """
+    self.tfidf = {}
     # stores document frequency per term
     self.df = Counter()
     # stores total frequency per term
