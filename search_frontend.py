@@ -1,11 +1,66 @@
 from flask import Flask, request, jsonify
+from collections import Counter
+from mpmath import re
+from nltk.corpus import stopwords
+from inverted_index_gcp import *
+import math
+
+
+index = None                           # Create inverted index instance
+english_stopwords = frozenset(stopwords.words('english'))
+corpus_stopwords = ['category', 'references', 'also', 'links', 'extenal', 'see', 'thumb']
+RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){2,24}""", re.UNICODE)
+
+all_stopwords = english_stopwords.union(corpus_stopwords)
 
 class MyFlaskApp(Flask):
     def run(self, host=None, port=None, debug=None, **options):
+        index = InvertedIndex.read_index('.', 'index')
+        N = len(index.nf)
         super(MyFlaskApp, self).run(host=host, port=port, debug=debug, **options)
 
 app = MyFlaskApp(__name__)
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+
+
+def query_handler(text):
+    tokens = [token.group() for token in RE_WORD.finditer(text.lower())]
+    tokens_stem = [stemmer.stem(token) for token in tokens]
+    sizeOfDoc = 0
+    word_counts = Counter()
+
+    for token in tokens_stem:
+        if (token not in all_stopwords):
+            word_counts[token] += 1
+            sizeOfDoc += 1
+
+    query_dict = {}
+    for token, count in word_counts.items():
+        tf_idf = (count / sizeOfDoc) * math.log10(N / index.df[token])
+        result_dict[token] = tf_idf
+
+    return query_dict
+
+def calculate_nfQuery(query_dict):
+    nfQuery = 0
+    for term, value in query_dict.items():
+        nfQuery = nfQuery + value ** 2
+    nfQuery = 1 / math.sqrt(nfQuery)
+    return nfQuery
+
+def claculate_docTfIdf(query_dict):
+    simDoc = Counter()
+    nfQuery = calculate_nfQuery(query)
+    for term, value in query.items():
+        docTfItf = index.tfidf[term]
+        for doc, weight in docTfItf:
+            simDoc[doc] += value * weight
+
+    for doc, sim in simDoc.items():
+        simDoc[doc] = simDoc[doc] * nfQuery * index.nf[doc]
+
+    return simDoc
+
 
 
 @app.route("/search")
@@ -31,6 +86,9 @@ def search():
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
+    query = query_handler(query)
+    similarity_docs = claculate_docTfIdf(query)
+    return similarity_docs.most_common(100)
 
     # END SOLUTION
     return jsonify(res)
