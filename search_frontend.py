@@ -5,8 +5,10 @@ from nltk.corpus import stopwords
 from inverted_index_gcp import *
 import math
 
-
-index = None                           # Create inverted index instance
+bucket_name = 'irproject-414719bucket'
+index_body = None                           # Create inverted index instance
+index_title = None
+index_views = None
 english_stopwords = frozenset(stopwords.words('english'))
 corpus_stopwords = ['category', 'references', 'also', 'links', 'extenal', 'see', 'thumb']
 RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){2,24}""", re.UNICODE)
@@ -15,8 +17,10 @@ all_stopwords = english_stopwords.union(corpus_stopwords)
 
 class MyFlaskApp(Flask):
     def run(self, host=None, port=None, debug=None, **options):
-        index = InvertedIndex.read_index('.', 'index')
-        N = len(index.nf)
+        index_body = InvertedIndex.read_index('postings_gcp', 'index', bucket_name)
+        index_title = InvertedIndex.read_index('postings_gcp_title', 'indexTitle', bucket_name)
+        index_views = InvertedIndex.read_index('page_views', 'pageviews', bucket_name)
+        N = len(index_body.nf)
         super(MyFlaskApp, self).run(host=host, port=port, debug=debug, **options)
 
 app = MyFlaskApp(__name__)
@@ -36,31 +40,41 @@ def query_handler(text):
 
     query_dict = {}
     for token, count in word_counts.items():
-        tf_idf = (count / sizeOfDoc) * math.log10(N / index.df[token])
-        result_dict[token] = tf_idf
+        tf = (count / sizeOfDoc)
+        result_dict[token] = tf
 
     return query_dict
 
 def calculate_nfQuery(query_dict):
     nfQuery = 0
     for term, value in query_dict.items():
-        nfQuery = nfQuery + value ** 2
+        nfQuery = nfQuery + (value* math.log10(N / index_body.df[term])) ** 2
     nfQuery = 1 / math.sqrt(nfQuery)
     return nfQuery
 
-def claculate_docTfIdf(query_dict):
-    simDoc = Counter()
+def claculate_docTfIdf(query_dict, simDoc):
     nfQuery = calculate_nfQuery(query)
     for term, value in query.items():
-        docTfItf = index.tfidf[term]
-        for doc, weight in docTfItf:
-            simDoc[doc] += value * weight
-
+        post = read_a_posting_list('postings_gcp', term, bucket_name)
+        for doc, freq in post:
+            simDoc[doc] += (value* math.log10(N / index_body.df[term])) * (freq / index_body.nf[doc][1]) * math.log10(N / index_body.df[term])
     for doc, sim in simDoc.items():
-        simDoc[doc] = simDoc[doc] * nfQuery * index.nf[doc]
+        simDoc[doc] = 0.3 * simDoc[doc] * nfQuery * index_body.nf[doc]
 
     return simDoc
 
+
+def claculate_titleTf(query_dict, simDoc):
+    for term, value in query_dict.items():
+        docTf = index_title.tfTitle[term]
+        for doc, weight in docTf:
+            simDoc[doc] += 0.4 * value * weight
+
+    return simDoc
+
+def claculate_Tfviews(simDoc):
+    for doc, sim in simDoc.items():
+        simDoc[doc] = 0.3 * index_views[doc]
 
 
 @app.route("/search")
@@ -86,10 +100,11 @@ def search():
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
+    simDoc = Counter()
     query = query_handler(query)
-    similarity_docs = claculate_docTfIdf(query)
+    simDoc = claculate_docTfIdf(query, simDoc)
+    simDoc = claculate_titleTf(query, simDoc)
     return similarity_docs.most_common(100)
-
     # END SOLUTION
     return jsonify(res)
 
