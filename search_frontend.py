@@ -4,23 +4,38 @@ from mpmath import re
 from nltk.corpus import stopwords
 from inverted_index_gcp import *
 import math
+from google.cloud import storage
+from nltk.stem.porter import *
+import pickle
+
 
 bucket_name = 'irproject-414719bucket'
-index_body = None                           # Create inverted index instance
-index_title = None
-index_views = None
+
 english_stopwords = frozenset(stopwords.words('english'))
 corpus_stopwords = ['category', 'references', 'also', 'links', 'extenal', 'see', 'thumb']
 RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){2,24}""", re.UNICODE)
-
 all_stopwords = english_stopwords.union(corpus_stopwords)
+stemmer = PorterStemmer()
+
+
+def loadIndex(path):
+  storage_client = storage.Client()
+  bucket = storage_client.bucket(bucket_name)
+  blob = bucket.blob(path)
+  contents = blob.download_as_bytes()
+  return pickle.loads(contents)
+
+index_body = None                         
+index_title = None
+index_views = None
 
 class MyFlaskApp(Flask):
     def run(self, host=None, port=None, debug=None, **options):
-        index_body = InvertedIndex.read_index('postings_gcp', 'index', bucket_name)
-        index_title = InvertedIndex.read_index('postings_gcp_title', 'indexTitle', bucket_name)
-        index_views = InvertedIndex.read_index('page_views', 'pageviews', bucket_name)
-        N = len(index_body.nf)
+        
+        index_title = loadIndex('postings_gcp_Title/indexTitle.pkl')
+        #index_body = InvertedIndex.read_index('postings_gcp', 'index', bucket_name)
+        #index_views = InvertedIndex.read_index('page_views', 'pageviews', bucket_name)
+        #N = len(index_body.nf)
         super(MyFlaskApp, self).run(host=host, port=port, debug=debug, **options)
 
 app = MyFlaskApp(__name__)
@@ -41,7 +56,7 @@ def query_handler(text):
     query_dict = {}
     for token, count in word_counts.items():
         tf = (count / sizeOfDoc)
-        result_dict[token] = tf
+        query_dict[token] = tf
 
     return query_dict
 
@@ -68,13 +83,14 @@ def claculate_titleTf(query_dict, simDoc):
     for term, value in query_dict.items():
         docTf = index_title.tfTitle[term]
         for doc, weight in docTf:
-            simDoc[doc] += 0.4 * value * weight
+            simDoc[doc] += 1 * value * weight
 
     return simDoc
 
 def claculate_Tfviews(simDoc):
     for doc, sim in simDoc.items():
-        simDoc[doc] = 0.3 * index_views[doc]
+        a = index_views[doc]
+        simDoc[doc] += 0.3 * index_views[doc]
 
 
 @app.route("/search")
@@ -102,9 +118,10 @@ def search():
     # BEGIN SOLUTION
     simDoc = Counter()
     query = query_handler(query)
-    simDoc = claculate_docTfIdf(query, simDoc)
+    #simDoc = claculate_docTfIdf(query, simDoc)
     simDoc = claculate_titleTf(query, simDoc)
-    return similarity_docs.most_common(100)
+    #simDoc = claculate_Tfviews(simDoc)
+    res = simDoc.most_common(100)
     # END SOLUTION
     return jsonify(res)
 
