@@ -1,1 +1,1 @@
-# IR Project - Wikipedia Search Engine /n By Yehonatan Kidushim and Ofek Kachlon.
+# IR Project - Wikipedia Search Engine <br /> By Yehonatan Kidushim and Ofek Kachlon.
