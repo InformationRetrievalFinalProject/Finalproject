@@ -25,16 +25,17 @@ def loadIndex(path):
   contents = blob.download_as_bytes()
   return pickle.loads(contents)
 
-index_body = None                         
-index_title = None
-index_views = None
+index_body = loadIndex('bucketText/indexText.pkl')                       
+index_title = loadIndex('bucketTitle/indexTitle.pkl')
+index_views = loadIndex('page_views/pageviews.pkl')
+N = len(index_body.nf)
 
 class MyFlaskApp(Flask):
     def run(self, host=None, port=None, debug=None, **options):
         
-        index_title = loadIndex('postings_gcp_Title/indexTitle.pkl')
-        #index_body = InvertedIndex.read_index('postings_gcp', 'index', bucket_name)
-        #index_views = InvertedIndex.read_index('page_views', 'pageviews', bucket_name)
+        #index_title = loadIndex('postings_gcp_Title/indexTitle.pkl')
+        #index_body = loadIndex('postings_gcp/index.pkl')
+        #index_views = loadIndex('page_views/pageviews.pkl')
         #N = len(index_body.nf)
         super(MyFlaskApp, self).run(host=host, port=port, debug=debug, **options)
 
@@ -68,9 +69,9 @@ def calculate_nfQuery(query_dict):
     return nfQuery
 
 def claculate_docTfIdf(query_dict, simDoc):
-    nfQuery = calculate_nfQuery(query)
-    for term, value in query.items():
-        post = read_a_posting_list('postings_gcp', term, bucket_name)
+    nfQuery = calculate_nfQuery(query_dict)
+    for term, value in query_dict.items():
+        post = InvertedIndex().read_a_posting_list('postings_gcp', term, bucket_name)
         for doc, freq in post:
             simDoc[doc] += (value* math.log10(N / index_body.df[term])) * (freq / index_body.nf[doc][1]) * math.log10(N / index_body.df[term])
     for doc, sim in simDoc.items():
@@ -81,17 +82,18 @@ def claculate_docTfIdf(query_dict, simDoc):
 
 def claculate_titleTf(query_dict, simDoc):
     for term, value in query_dict.items():
-        docTf = index_title.tfTitle[term]
+        docTf = index_title.tf[term]
         for doc, weight in docTf:
-            simDoc[doc] += 1 * value * weight
+            simDoc[doc] += 0.5 * value * weight
 
     return simDoc
 
 def claculate_Tfviews(simDoc):
     for doc, sim in simDoc.items():
         a = index_views[doc]
-        simDoc[doc] += 0.3 * index_views[doc]
+        simDoc[doc] += 0.2 * index_views[doc]
 
+    return simDoc
 
 @app.route("/search")
 def search():
@@ -118,10 +120,10 @@ def search():
     # BEGIN SOLUTION
     simDoc = Counter()
     query = query_handler(query)
-    #simDoc = claculate_docTfIdf(query, simDoc)
+    simDoc = claculate_docTfIdf(query, simDoc)
     simDoc = claculate_titleTf(query, simDoc)
-    #simDoc = claculate_Tfviews(simDoc)
-    res = simDoc.most_common(100)
+    simDoc = claculate_Tfviews(simDoc)
+    res = [(str(item[0]), item[1]) for item in simDoc.most_common(100)]
     # END SOLUTION
     return jsonify(res)
 
