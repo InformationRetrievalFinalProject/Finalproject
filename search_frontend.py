@@ -7,16 +7,15 @@ import math
 from google.cloud import storage
 from nltk.stem.porter import *
 import pickle
-
+import string
 
 bucket_name = 'irproject-414719bucket'
 
 english_stopwords = frozenset(stopwords.words('english'))
-corpus_stopwords = ['category', 'references', 'also', 'links', 'extenal', 'see', 'thumb']
+corpus_stopwords = ['category', 'references', 'also', 'links', 'extenal', 'see', 'thumb', 'became', 'may']
 RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){2,24}""", re.UNICODE)
 all_stopwords = english_stopwords.union(corpus_stopwords)
 stemmer = PorterStemmer()
-
 
 def loadIndex(path):
   storage_client = storage.Client()
@@ -28,15 +27,13 @@ def loadIndex(path):
 index_body = loadIndex('bucketText/indexText.pkl')                       
 index_title = loadIndex('bucketTitle/indexTitle.pkl')
 index_views = loadIndex('page_views/pageviews.pkl')
+index_pageRanks = loadIndex('page_ranks/pageRanks.pickle')
+dictIdTitle = loadIndex('bucketTitle/dictIdTitle.pkl')
 N = len(index_body.nf)
+containQues = False
 
 class MyFlaskApp(Flask):
     def run(self, host=None, port=None, debug=None, **options):
-        
-        #index_title = loadIndex('postings_gcp_Title/indexTitle.pkl')
-        #index_body = loadIndex('postings_gcp/index.pkl')
-        #index_views = loadIndex('page_views/pageviews.pkl')
-        #N = len(index_body.nf)
         super(MyFlaskApp, self).run(host=host, port=port, debug=debug, **options)
 
 app = MyFlaskApp(__name__)
@@ -44,6 +41,7 @@ app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
 
 
 def query_handler(text):
+
     tokens = [token.group() for token in RE_WORD.finditer(text.lower())]
     tokens_stem = [stemmer.stem(token) for token in tokens]
     sizeOfDoc = 0
@@ -61,39 +59,55 @@ def query_handler(text):
 
     return query_dict
 
+
 def calculate_nfQuery(query_dict):
     nfQuery = 0
+    
     for term, value in query_dict.items():
-        nfQuery = nfQuery + (value* math.log10(N / index_body.df[term])) ** 2
+      nfQuery = nfQuery + value ** 2
+
     nfQuery = 1 / math.sqrt(nfQuery)
     return nfQuery
 
 def claculate_docTfIdf(query_dict, simDoc):
     nfQuery = calculate_nfQuery(query_dict)
+
+    alpha = 0.3
+    if containQues:
+      alpha = 0.6
+
     for term, value in query_dict.items():
-        post = InvertedIndex().read_a_posting_list('postings_gcp', term, bucket_name)
+        post = index_body.read_a_posting_list('.', term, bucket_name)
+
         for doc, freq in post:
-            simDoc[doc] += (value* math.log10(N / index_body.df[term])) * (freq / index_body.nf[doc][1]) * math.log10(N / index_body.df[term])
+            simDoc[doc] += value * (freq / index_body.nf[doc][1]) * math.log10(N / index_body.df[term])
+
+      
     for doc, sim in simDoc.items():
-        simDoc[doc] = 0.3 * simDoc[doc] * nfQuery * index_body.nf[doc]
+        simDoc[doc] = 0 * simDoc[doc] * nfQuery * index_body.nf[doc][0]
 
     return simDoc
 
 
 def claculate_titleTf(query_dict, simDoc):
-    for term, value in query_dict.items():
-        docTf = index_title.tf[term]
-        for doc, weight in docTf:
-            simDoc[doc] += 0.5 * value * weight
 
-    return simDoc
+  alpha = 0.45
+  if containQues:
+    alpha = 0.15
 
-def claculate_Tfviews(simDoc):
+  for term, value in query_dict.items():
+    docTf = index_title.tf[term]
+    for doc, weight in docTf:
+      simDoc[doc] += 0.75 * value * weight/ (len(query_dict))
+
+  return simDoc
+
+def claculate_viewsAndRanks(simDoc):
     for doc, sim in simDoc.items():
-        a = index_views[doc]
-        simDoc[doc] += 0.2 * index_views[doc]
+        simDoc[doc] += 0.1 * index_views[doc] + 0.15 * index_pageRanks[doc]
 
     return simDoc
+
 
 @app.route("/search")
 def search():
@@ -118,12 +132,19 @@ def search():
     if len(query) == 0:
       return jsonify(res)
     # BEGIN SOLUTION
+    
+    if "?" in query:
+      containQues = True
+    else:
+      containQues = False
+      
     simDoc = Counter()
-    query = query_handler(query)
-    simDoc = claculate_docTfIdf(query, simDoc)
-    simDoc = claculate_titleTf(query, simDoc)
-    simDoc = claculate_Tfviews(simDoc)
-    res = [(str(item[0]), item[1]) for item in simDoc.most_common(100)]
+    query_dict = query_handler(query)
+    #simDoc = claculate_docTfIdf(query_dict, simDoc)
+    simDoc = claculate_titleTf(query_dict, simDoc)
+    simDoc = claculate_viewsAndRanks(simDoc)
+    res = [(str(item[0]), dictIdTitle.tf[item[0]]) for item in simDoc.most_common(100)]
+
     # END SOLUTION
     return jsonify(res)
 
