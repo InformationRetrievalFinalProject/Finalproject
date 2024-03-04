@@ -26,11 +26,18 @@ def loadIndex(path):
 
 index_body = loadIndex('bucketText/indexText.pkl')                       
 index_title = loadIndex('bucketTitle/indexTitle.pkl')
+index_anchorText = loadIndex('bucketAnchorText/indexAnchorText.pkl')
 index_views = loadIndex('page_views/pageviews.pkl')
 index_pageRanks = loadIndex('page_ranks/pageRanks.pickle')
 dictIdTitle = loadIndex('bucketTitle/dictIdTitle.pkl')
 N = len(index_body.nf)
-containQues = False
+
+sizeAvg = 0
+for key, value in index_body.nf.items():
+  sizeAvg += value[1]
+
+sizeAvg = sizeAvg / N
+
 
 class MyFlaskApp(Flask):
     def run(self, host=None, port=None, debug=None, **options):
@@ -55,7 +62,7 @@ def query_handler(text):
     query_dict = {}
     for token, count in word_counts.items():
         tf = (count / sizeOfDoc)
-        query_dict[token] = tf
+        query_dict[token] = count
 
     return query_dict
 
@@ -72,9 +79,8 @@ def calculate_nfQuery(query_dict):
 def claculate_docTfIdf(query_dict, simDoc):
     nfQuery = calculate_nfQuery(query_dict)
 
-    alpha = 0.3
-    if containQues:
-      alpha = 0.6
+    for key in simDoc:
+      simDoc[key] = 0
 
     for term, value in query_dict.items():
         post = index_body.read_a_posting_list('.', term, bucket_name)
@@ -84,29 +90,89 @@ def claculate_docTfIdf(query_dict, simDoc):
 
       
     for doc, sim in simDoc.items():
-        simDoc[doc] = 0 * simDoc[doc] * nfQuery * index_body.nf[doc][0]
+        simDoc[doc] = 0.13 * simDoc[doc] * nfQuery * index_body.nf[doc][0]
 
     return simDoc
 
 
-def claculate_titleTf(query_dict, simDoc):
+# def claculate_titleTf(query_dict, simDoc):
 
-  alpha = 0.45
-  if containQues:
-    alpha = 0.15
+#   for term, value in query_dict.items():
+#     docTf = index_title.tf[term]
+#     for doc, weight in docTf:
+#       simDoc[doc] += 0.45 * value * weight/ (len(query_dict))
 
+#   return simDoc
+
+# def claculate_viewsAndRanks(simDoc):
+#     for doc, sim in simDoc.items():
+#         simDoc[doc] += 0.1 * index_views[doc] + 0.15 * index_pageRanks[doc]
+
+#     return simDoc
+
+
+
+def calculateBM25(query_dict, simDocByTitle):
+
+  k1 = 1.2
+  k3 = 2.2
+  b = 0.7
+  
+  simDoc = Counter()
   for term, value in query_dict.items():
-    docTf = index_title.tf[term]
-    for doc, weight in docTf:
-      simDoc[doc] += 0.75 * value * weight/ (len(query_dict))
+    post = index_body.read_a_posting_list('.', term, bucket_name)
 
-  return simDoc
+    for doc, freq in post:
+      a = ((k1 + 1)*(freq/index_body.nf[doc][1])) / (k1 * (1-b+b*(index_body.nf[doc][1]/sizeAvg)))
+      b = math.log10((N+1) / index_body.df[term])
+      c = ((k3 + 1)*value) / (k3 + value)
+      simDoc[doc] += a * b * c
 
-def claculate_viewsAndRanks(simDoc):
-    for doc, sim in simDoc.items():
-        simDoc[doc] += 0.1 * index_views[doc] + 0.15 * index_pageRanks[doc]
 
-    return simDoc
+  maxVal = simDoc.most_common(1)[0][1]
+  for key in simDoc:
+      simDoc[key] = 0.37 * (simDoc[key] / maxVal)
+
+  return simDoc + simDocByTitle
+
+
+# def dotProductByAnchor(query_dict):
+
+#   simDoc = Counter()
+#   for term, value in query_dict.items():
+#     post = index_anchorText.read_a_posting_list('.', term, bucket_name)
+
+#     for doc, freq in post:
+#         simDoc[doc] += value * 1
+
+#   maxVal = simDoc.most_common(1)[0][1]
+#   for key in simDoc:
+#     simDoc[key] = (simDoc[key] / maxVal)
+
+  
+#   return simDoc
+
+
+def topViewAndRankByTitle(query_dict, simDoc):
+
+  simDoc = Counter()
+  for term in query_dict:
+    TitlesContainTerm = index_title.tf[term]
+    for doc, weight in TitlesContainTerm:
+      simDoc[doc] = 0.23 * (index_views[doc] + index_pageRanks[doc])
+
+  return Counter(dict(simDoc.most_common(100)))
+
+def topViewAndRankByAnchor(query_dict, simDocByTitle):
+
+  simDoc = Counter()
+  for term in query_dict:
+    TitlesContainTerm = index_title.tf[term]
+    for doc, weight in TitlesContainTerm:
+      if doc not in simDocByTitle:
+        simDoc[doc] = 0.1 * (index_views[doc] + index_pageRanks[doc])
+
+  return Counter(dict(simDoc.most_common(800)))
 
 
 @app.route("/search")
@@ -133,18 +199,35 @@ def search():
       return jsonify(res)
     # BEGIN SOLUTION
     
-    if "?" in query:
-      containQues = True
-    else:
-      containQues = False
-      
+    Fquery = Counter()
     simDoc = Counter()
     query_dict = query_handler(query)
-    #simDoc = claculate_docTfIdf(query_dict, simDoc)
-    simDoc = claculate_titleTf(query_dict, simDoc)
-    simDoc = claculate_viewsAndRanks(simDoc)
-    res = [(str(item[0]), dictIdTitle.tf[item[0]]) for item in simDoc.most_common(100)]
+    simDocByTitle = topViewAndRankByTitle(query_dict, simDoc)
+    simDoc2 = claculate_docTfIdf(query_dict, simDoc)
+    simDocByAnchor = topViewAndRankByAnchor(query_dict, simDocByTitle)
+    simBm25 = calculateBM25(query_dict, Counter())
 
+    for doc, value in simDocByTitle.items():
+      Fquery[doc] += value
+
+    for doc, value in simDocByAnchor.items():
+      Fquery[doc] += value
+
+    for doc, value in Fquery.items():
+      Fquery[doc] += simDoc2[doc]
+
+    for doc, value in Fquery.items():
+      Fquery[doc] += simBm25[doc]
+
+    
+      
+    # simDoc = claculate_docTfIdf(query_dict, simDoc)
+    # simDoc = claculate_titleTf(query_dict, simDoc)
+    # simDoc = claculate_viewsAndRanks(simDoc)
+    # simDocByAnchor = topViewAndRankByAnchor(query_dict, simDocByTitle)
+    # simDoc = claculate_docTfIdf(query_dict, simDocByTitle + simDocByAnchor)
+    # simDoc = simDocByTitle
+    res = [(str(item[0]), item[1]) for item in Fquery.most_common(100)]
     # END SOLUTION
     return jsonify(res)
 
