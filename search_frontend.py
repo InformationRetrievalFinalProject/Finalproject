@@ -12,8 +12,8 @@ import string
 bucket_name = 'irproject-414719bucket'
 
 english_stopwords = frozenset(stopwords.words('english'))
-corpus_stopwords = ['category', 'references', 'also', 'links', 'extenal', 'see', 'thumb', 'became', 'may']
-RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){2,24}""", re.UNICODE)
+corpus_stopwords = ['category', 'references', 'also', 'links', 'extenal', 'see', 'thumb', 'became', 'may', 'considered', 'known', 'meaning', 'mean', 'occur', 'describe']
+RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){1,24}""", re.UNICODE)
 all_stopwords = english_stopwords.union(corpus_stopwords)
 stemmer = PorterStemmer()
 
@@ -62,7 +62,7 @@ def query_handler(text):
     query_dict = {}
     for token, count in word_counts.items():
         tf = (count / sizeOfDoc)
-        query_dict[token] = count
+        query_dict[token] = tf
 
     return query_dict
 
@@ -76,23 +76,23 @@ def calculate_nfQuery(query_dict):
     nfQuery = 1 / math.sqrt(nfQuery)
     return nfQuery
 
-def claculate_docTfIdf(query_dict, simDoc):
+def claculate_docTfIdf(query_dict, simDocTop, alpha):
     nfQuery = calculate_nfQuery(query_dict)
 
-    for key in simDoc:
-      simDoc[key] = 0
+    simDoc = Counter()
 
     for term, value in query_dict.items():
         post = index_body.read_a_posting_list('.', term, bucket_name)
 
         for doc, freq in post:
-            simDoc[doc] += value * (freq / index_body.nf[doc][1]) * math.log10(N / index_body.df[term])
+          if(doc in simDocTop):
+            simDoc[doc] += value * math.log10(N / index_body.df[term])
 
       
     for doc, sim in simDoc.items():
-        simDoc[doc] = simDoc[doc] * nfQuery * index_body.nf[doc][0]
+        simDoc[doc] = alpha * simDoc[doc] * nfQuery * index_body.nf[doc][0]
 
-    return simDoc
+    return simDoc + simDocTop
 
 
 def claculate_viewsAndRanks(simDoc):
@@ -103,7 +103,7 @@ def claculate_viewsAndRanks(simDoc):
 
 
 
-def calculateBM25(query_dict, simDocByTitle):
+def calculateBM25(query_dict, simDocTop, alpha):
 
   k1 = 1.2
   k3 = 2.2
@@ -114,55 +114,62 @@ def calculateBM25(query_dict, simDocByTitle):
     post = index_body.read_a_posting_list('.', term, bucket_name)
 
     for doc, freq in post:
-      a = ((k1 + 1)*(freq)) / (k1 * (1-b+b*(index_body.nf[doc][1]/sizeAvg)))
-      b = math.log10((N+1) / index_body.df[term])
-      c = ((k3 + 1)*value) / (k3 + value)
-      simDoc[doc] += a * b * c
-
+      if(doc in simDocTop):
+        B = 1-b+b*(index_body.nf[doc][1]/sizeAvg)
+        tf = freq
+        G = ((k1 + 1)*tf) / (k1 * B + tf)
+        F = math.log10((N+1) / index_body.df[term])
+        H = ((k3 + 1)*value) / (k3 + value)
+        simDoc[doc] += G * F * H
 
   maxVal = simDoc.most_common(1)[0][1]
   for key in simDoc:
-      simDoc[key] = (simDoc[key] / maxVal)
+      simDoc[key] = alpha * (simDoc[key] / maxVal)
 
-  return simDoc + simDocByTitle
+  return simDoc + simDocTop
 
 
-# def dotProductByAnchor(query_dict):
+def topByAnchorText(query_dict, alpha):
 
-#   simDoc = Counter()
-#   for term, value in query_dict.items():
-#     post = index_anchorText.read_a_posting_list('.', term, bucket_name)
+  simDoc = Counter()
+  for term, value in query_dict.items():
+    post = index_anchorText.read_a_posting_list('.', term, bucket_name)
+    for doc, freq in post:
+        simDoc[doc] += 1
 
-#     for doc, freq in post:
-#         simDoc[doc] += value * 1
+  maxVal = simDoc.most_common(1)[0][1]
+  for key in simDoc:
+    simDoc[key] = alpha * (simDoc[key] / maxVal)
 
-#   maxVal = simDoc.most_common(1)[0][1]
-#   for key in simDoc:
-#     simDoc[key] = (simDoc[key] / maxVal)
+  return Counter(dict(simDoc.most_common(500)))
 
   
-#   return simDoc
+  
 
-def claculate_titleTf(query_dict, simDoc):
+def claculate_titleTf(query_dict, simDoc, alpha):
 
   for term, value in query_dict.items():
     docTf = index_title.tf[term]
     for doc, weight in docTf:
       if doc in simDoc:
-        simDoc[doc] +=  0.7 * value * weight 
+        simDoc[doc] += alpha * value * weight
 
   return simDoc
 
 
-def topViewAndRankByTitle(query_dict):
+
+def topViewAndRankByTitle(query_dict, alpha):
 
   simDoc = Counter()
   for term in query_dict:
     TitlesContainTerm = index_title.tf[term]
     for doc, weight in TitlesContainTerm:
-      simDoc[doc] =  0.3 * (index_views[doc] + index_pageRanks[doc])
+      simDoc[doc] =  alpha * (index_views[doc] + index_pageRanks[doc])
 
   return Counter(dict(simDoc.most_common(100)))
+
+
+
 
 
 @app.route("/search")
@@ -192,29 +199,21 @@ def search():
     query_dict = query_handler(query)
 
     if len(query_dict) == 1:
-      simDoc = topViewAndRankByTitle(query_dict)
-      simDoc = claculate_titleTf(query_dict, simDoc)
+      simDocByTitle = topViewAndRankByTitle(query_dict, 0.3)
+      simDoc = claculate_titleTf(query_dict, simDocByTitle, 0.7)
+
 
     elif "?" in query:
-      pass
+      simDocByAnchor = topByAnchorText(query_dict, 1)
+      simDocByTitle = topViewAndRankByTitle(query_dict, 1)
+      simDoc = calculateBM25(query_dict, simDocByAnchor + simDocByTitle)
 
-    
     else:
-      pass
+      simDocByTitle = topViewAndRankByTitle(query_dict, 0.1)
+      simDoc = claculate_titleTf(query_dict,simDocByTitle, 0.55)
+      simDoc = calculateBM25(query_dict, simDoc, 0.35)
 
 
-    
-    # if "?" in query:
-    #   simDoc = dotProductByAnchor(query_dict, simDoc)
-    # else:
-    #   simDoc = topViewAndRankByTitle(query_dict, simDoc)
-      
-    # simDoc = claculate_docTfIdf(query_dict, simDoc)
-    # simDoc = claculate_titleTf(query_dict, simDoc)
-    # simDoc = claculate_viewsAndRanks(simDoc)
-    # simDocByAnchor = topViewAndRankByAnchor(query_dict, simDocByTitle)
-    # simDoc = claculate_docTfIdf(query_dict, simDocByTitle + simDocByAnchor)
-    # simDoc = simDocByTitle
     res = [(str(item[0]), item[1]) for item in simDoc.most_common(100)]
     # END SOLUTION
     return jsonify(res)
