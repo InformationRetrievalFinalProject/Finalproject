@@ -9,6 +9,9 @@ from nltk.stem.porter import *
 import pickle
 import string
 
+
+#--------------------------------------------- Global variables ---------------------------------------------------
+
 bucket_name = 'irproject-414719bucket'
 
 english_stopwords = frozenset(stopwords.words('english'))
@@ -17,6 +20,8 @@ RE_WORD = re.compile(r"""[\#\@\w](['\-]?\w){1,24}""", re.UNICODE)
 all_stopwords = english_stopwords.union(corpus_stopwords)
 stemmer = PorterStemmer()
 
+
+# This method load pickle file from bucket in GCP
 def loadIndex(path):
   storage_client = storage.Client()
   bucket = storage_client.bucket(bucket_name)
@@ -24,20 +29,21 @@ def loadIndex(path):
   contents = blob.download_as_bytes()
   return pickle.loads(contents)
 
-index_body = loadIndex('bucketText/indexText.pkl')                       
+
+#----------------------------------------------- Global indexes -------------------------------------------------
+
+index_body = loadIndex('bucketBody/indexBody.pkl')                       
 index_title = loadIndex('bucketTitle/indexTitle.pkl')
-#index_anchorText = loadIndex('bucketAnchorText/indexAnchorText.pkl')
+index_anchorText = loadIndex('bucketAnchorText/indexAnchorText.pkl')
 index_views = loadIndex('page_views/pageviews.pkl')
 index_pageRanks = loadIndex('page_ranks/pageRanks.pickle')
-dictIdTitle = loadIndex('bucketTitle/dictIdTitle.pkl')
-N = len(index_body.nf)
 
-sizeAvg = 0
-for key, value in index_body.nf.items():
-  sizeAvg += value[1]
 
-sizeAvg = sizeAvg / N
+dictIdTitle = loadIndex('bucketTitle/dictIdTitle.pkl')      # Dictionary of doc id to title
+N = len(index_body.nf)                                      # Size of corpus
 
+
+# ---------------------------------------- Initialize the search engine --------------------------------------
 
 class MyFlaskApp(Flask):
     def run(self, host=None, port=None, debug=None, **options):
@@ -46,6 +52,8 @@ class MyFlaskApp(Flask):
 app = MyFlaskApp(__name__)
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
 
+
+#--------------------------------------------- Query handler --------------------------------------------------
 
 def query_handler(text):
 
