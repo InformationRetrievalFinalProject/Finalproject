@@ -9,7 +9,10 @@ This file contains code for reading and writing an index to GCP storage bucket. 
 Additionally, this file contains all the methods and attribiutes of the InvertedIndex. <br /> <br />
 
 # Create indxes on GCP
-This directory contains 3 jupiter notebook files that show how we build the indexes.<br />
-- Create index of AnchorText GCP.ipynb: Contains the code for building an index for anchor text
-- Create index of text GCP.ipynb: Contains the code for building an index for text
-- Create index of titles GCP.ipynb: Contains the code for building an index for titles
+This directory contains 3 jupiter notebook files that show how we build the indexes. <br />
+- Create index of AnchorText GCP.ipynb: Contains the code for building an index for anchor text.
+- Create index of text GCP.ipynb: Contains the code for building an index for text.
+- Create index of titles GCP.ipynb: Contains the code for building an index for titles. <br /> <br />
+
+# Report.docx
+A description of key experiments we ran,how we evaluated them, and the key findings/takeaways.
