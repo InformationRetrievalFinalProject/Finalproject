@@ -10,4 +10,5 @@ Additionally, this file contains all the methods and attribiutes of the Inverted
 
 # Create indxes on GCP
 This directory contains 3 jupiter notebook files that show how we build the indexes.<br />
-<u>Underlined Text</u>
+Underlined Text
+--------------
