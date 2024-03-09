@@ -1,4 +1,4 @@
-# IR Project - Wikipedia Search Engine <br /> By Yehonatan Kidushim and Ofek Kachlon. <br />
+# IR Project - Wikipedia Search Engine <br /> By Yehonatan Kidushim and Ofek Kachlon. <br /> <br />
 
 # search_frontend.py
 Flask app for search engine frontend.
