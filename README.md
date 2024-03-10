@@ -16,3 +16,6 @@ This directory contains 3 jupiter notebook files that show how we build the inde
 
 # Report.pdf
 A description of key experiments we ran,how we evaluated them, and the key findings/takeaways.
+
+# All index files.txt
+List all index files with human-readable sizes.
