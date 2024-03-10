@@ -15,7 +15,7 @@ This directory contains 3 jupiter notebook files that show how we build the inde
 - Create index of titles GCP.ipynb: Contains the code for building an index for titles. <br /> <br />
 
 # Report.pdf
-A description of key experiments we ran,how we evaluated them, and the key findings/takeaways.
+A description of key experiments we ran,how we evaluated them, and the key findings/takeaways. <br /> <br />
 
 # All index files.txt
 List all index files with human-readable sizes.
